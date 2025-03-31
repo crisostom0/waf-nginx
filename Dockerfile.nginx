@@ -1,6 +1,6 @@
 FROM nginx:alpine
 
-# Instalar dependências necessárias, incluindo PCRE2
+# Instalar dependências necessárias, incluindo PCRE2 e libmaxminddb
 RUN apk update && apk add --no-cache \
     ca-certificates \
     wget \
@@ -31,7 +31,8 @@ RUN apk update && apk add --no-cache \
     flex \
     bison \
     yajl-dev \
-    && rm -rf /var/cache/apk/*  # Limpar cache para reduzir o tamanho da imagem
+    libmaxminddb-dev \
+    && rm -rf /var/cache/apk/*
 
 # Clonar e compilar o ModSecurity
 WORKDIR /opt
@@ -44,9 +45,9 @@ RUN ./build.sh && ./configure --with-pcre2=/usr && make && make install
 WORKDIR /opt
 RUN git clone --depth 1 https://github.com/SpiderLabs/ModSecurity-nginx.git
 
-#---
+# Clonar e compilar o módulo ngx_http_geoip2_module
+WORKDIR /opt
 RUN git clone --depth 1 https://github.com/leev/ngx_http_geoip2_module.git
-#---
 
 # Obter a versão do NGINX e extrair o código-fonte
 RUN NGINX_VERSION=$(nginx -v 2>&1 | sed 's/^.*nginx\///;s/ .*$//') && \
@@ -56,24 +57,21 @@ RUN NGINX_VERSION=$(nginx -v 2>&1 | sed 's/^.*nginx\///;s/ .*$//') && \
     tar -xzf nginx.tar.gz -C /opt/nginx-src --strip-components=1 && \
     rm nginx.tar.gz
 
+# Compilar o módulo ngx_http_geoip2_module
+WORKDIR /opt/nginx-src
+RUN ./configure --with-compat --add-dynamic-module=/opt/ngx_http_geoip2_module --with-http_geoip_module && \
+    make modules
+
 # Compilar o módulo ModSecurity para NGINX
 WORKDIR /opt/nginx-src
 RUN ./configure --with-compat --add-dynamic-module=/opt/ModSecurity-nginx && \
     make modules
 
-#---
-# Compilar o módulo ngx_http_geoip2_module teste
-WORKDIR /opt/nginx-src
-RUN ./configure --with-compat --add-dynamic-module=/opt/ngx_http_geoip2_module && \
-    make modules
-#---
-
-# Copiar o módulo compilado para o diretório de módulos do NGINX
+# Copiar os módulos compilados para o diretório de módulos do NGINX
 RUN mkdir -p /etc/nginx/modules/ && \
     cp /opt/nginx-src/objs/ngx_http_modsecurity_module.so /etc/nginx/modules/ && \
-#---
     cp /opt/nginx-src/objs/ngx_http_geoip2_module.so /etc/nginx/modules/
-#---
+
 # Baixar as regras OWASP CRS (Core Rule Set)
 WORKDIR /etc/nginx
 RUN git clone https://github.com/coreruleset/coreruleset.git && \
@@ -88,5 +86,8 @@ RUN rm -rf /opt/ModSecurity /opt/ModSecurity-nginx /opt/nginx-src
 
 # Configurar o NGINX para carregar o módulo ModSecurity
 RUN echo "load_module modules/ngx_http_modsecurity_module.so;" > /etc/nginx/modules/modsecurity.conf
+RUN echo "load_module modules/ngx_http_geoip2_module.so;" > /etc/nginx/modules/geoip2.conf
+RUN echo "load_module modules/ngx_http_geoip_module.so;" > /etc/nginx/modules/geoip.conf
 
 CMD ["nginx", "-g", "daemon off;"]
+

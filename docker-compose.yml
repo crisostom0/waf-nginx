@@ -4,7 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile.nginx
     container_name: nginx_waf
-    restart: always
+      #restart: always
+    restart: unless-stopped
+    image: nginx_waf:1.0
     tty: true
     environment:
       - TZ=America/Fortaleza
@@ -16,6 +18,8 @@ services:
       - ./config/nginx.conf:/etc/nginx/nginx.conf
       - ./modsec:/etc/nginx/modsec
       - ./ssl:/etc/ssl
+      - ./geo:/usr/share/GeoIP
+      - ./geo:/etc/nginx/geoip2
     networks:
       - proxy
 

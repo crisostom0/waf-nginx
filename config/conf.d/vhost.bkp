@@ -5,7 +5,7 @@ server {
     # Ativar ModSecurity para este servidor
     modsecurity on;
 
-    # Definir variável de bloqueio (não permitir outros países além de BR e US)
+    # Definir variável de bloqueio (permite somente BR)
     set $allow_country 0;
 
     # Permitir apenas Brasil (BR)

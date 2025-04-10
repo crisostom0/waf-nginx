@@ -1,4 +1,4 @@
-## 🇧🇷 Português do Brasil
+## 🇧🇷 Português
 
 # WAF com NGINX utilizando Docker 🇧🇷
 
@@ -28,8 +28,10 @@ Um Web Application Firewall (WAF) protege aplicações web contra ataques comuns
 ### Passos
 
 ```bash
+docker network create proxy
 git clone https://github.com/crisostom0/waf-nginx.git
 cd waf-nginx
+# Configure o server_name _; apontando para maquina com serviço WEB dentro de config/conf.d/vhost.conf
 docker build -t waf-nginx -f Dockerfile.nginx .
 docker-compose up -d
 ```
@@ -62,7 +64,7 @@ docker-compose down
 
 ---
 
-## 🇺🇸 English (US)
+## 🇺🇸 English
 
 # WAF with NGINX using Docker 🇺🇸
 
@@ -92,8 +94,10 @@ A Web Application Firewall (WAF) protects web apps against common attacks like X
 ### Steps
 
 ```bash
+docker network create proxy
 git clone https://github.com/crisostom0/waf-nginx.git
 cd waf-nginx
+# Configure server_name _; pointing to machine with WEB service inside config/conf.d/vhost.conf
 docker build -t waf-nginx -f Dockerfile.nginx .
 docker-compose up -d
 ```

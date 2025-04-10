@@ -1,6 +1,6 @@
 server {
     listen 80;
-    server_name labnginx.etice2.ce.gov.br;
+    server_name _;
 
     # Ativar ModSecurity para este servidor
     modsecurity on;

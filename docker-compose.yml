@@ -1,0 +1,27 @@
+services:
+  nginx_waf:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    container_name: nginx_waf
+    restart: always
+    image: nginx_waf:1.0
+    tty: true
+    environment:
+      - TZ=America/Fortaleza
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/conf.d:/etc/nginx/conf.d
+      - ./config/nginx.conf:/etc/nginx/nginx.conf
+      - ./modsec:/etc/nginx/modsec
+      - ./ssl:/etc/ssl
+      - ./geo:/usr/share/GeoIP
+      - ./geo:/etc/nginx/geoip2
+    networks:
+      - proxy
+
+networks:
+  proxy: 
+      external: true

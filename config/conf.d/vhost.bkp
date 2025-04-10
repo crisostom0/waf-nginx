@@ -1,0 +1,49 @@
+server {
+    listen 80;
+    server_name labnginx.etice2.ce.gov.br;
+
+    # Ativar ModSecurity para este servidor
+    modsecurity on;
+
+    # Definir variável de bloqueio (não permitir outros países além de BR e US)
+    set $allow_country 0;
+
+    # Permitir apenas Brasil (BR)
+    if ($geoip2_data_country_code = "BR") {
+        set $allow_country 1;
+    }
+
+    # Bloquear tráfego de outros países
+    if ($allow_country = 0) {
+        return 403;
+    }
+
+    # Bloquear tráfego de um país específico (exemplo: Brasil)
+    #if ($geoip2_data_country_code = "BR") {
+    #    return 403;  # Bloqueia acesso do Brasil
+    #}
+
+    # Bloquear tráfego por IP (exemplo: IP 192.168.68.106)
+    #set $blocked_ip 0;
+    #if ($remote_addr = "192.168.68.106") {
+    #    set $blocked_ip 1;
+    #}
+    #if ($blocked_ip) {
+    #    return 403;  # Bloqueia IP 192.168.68.106
+    #}
+
+    location / {
+        proxy_pass http://httpd:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    error_page 500 502 503 504 /50x.html;
+
+    location = /50x.html {
+        root /usr/share/nginx/html;
+    }
+}
+

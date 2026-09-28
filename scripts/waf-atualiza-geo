@@ -1,39 +1,70 @@
 #!/usr/bin/env python3
-"""Gera as faixas de IP de um país para o módulo geo do Nginx.
+"""Gera as listas de IP do WAF para o módulo geo do Nginx.
 
-Baixa as delegações de IP do LACNIC, converte em blocos CIDR e grava
-/etc/nginx/waf/geo-pais.conf. Se o Nginx rejeitar o arquivo novo, o
-anterior é restaurado. Só funciona para países da região do LACNIC
-(América Latina e Caribe).
+- geo-pais.conf: faixas dos países liberados, a partir das delegações do
+  LACNIC (só países da América Latina e Caribe).
+- geo-datacenters.conf: faixas dos provedores listados em
+  asn-datacenters.txt, a partir da base gratuita DB-IP Lite
+  (IP to ASN Lite by DB-IP, https://db-ip.com, CC BY 4.0).
+
+Se o Nginx rejeitar as listas novas, as anteriores são restauradas.
 """
 import argparse
+import csv
+import datetime
+import gzip
+import io
 import ipaddress
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 
-URL = "https://ftp.lacnic.net/pub/stats/lacnic/delegated-lacnic-extended-latest"
-DESTINO = "/etc/nginx/waf/geo-pais.conf"
-# O arquivo completo tem dezenas de milhares de linhas; bem menos que isso
-# indica download truncado.
-MINIMO_LINHAS = 10000
+PASTA = "/etc/nginx/waf"
+ARQ_PAIS = f"{PASTA}/geo-pais.conf"
+ARQ_DATACENTERS = f"{PASTA}/geo-datacenters.conf"
+LISTA_ASNS = f"{PASTA}/asn-datacenters.txt"
+
+LACNIC_URL = "https://ftp.lacnic.net/pub/stats/lacnic/delegated-lacnic-extended-latest"
+DBIP_URL = "https://download.db-ip.com/free/dbip-asn-lite-{:%Y-%m}.csv.gz"
+
+# Os arquivos completos têm muito mais linhas que isso; bem menos indica
+# download truncado.
+MINIMO_LINHAS_LACNIC = 10000
+MINIMO_LINHAS_DBIP = 100000
 
 
-def baixar():
-    with urllib.request.urlopen(URL, timeout=120) as resposta:
-        texto = resposta.read().decode("ascii", errors="replace")
-    linhas = texto.splitlines()
+def baixar(url):
+    pedido = urllib.request.Request(url, headers={"User-Agent": "waf-atualiza-geo"})
+    with urllib.request.urlopen(pedido, timeout=120) as resposta:
+        return resposta.read()
+
+
+def colapsar(redes):
+    v4 = [r for r in redes if r.version == 4]
+    v6 = [r for r in redes if r.version == 6]
+    return list(ipaddress.collapse_addresses(v4)) + list(ipaddress.collapse_addresses(v6))
+
+
+def faixa(inicio, fim):
+    return ipaddress.summarize_address_range(ipaddress.ip_address(inicio), ipaddress.ip_address(fim))
+
+
+def formatar(cabecalho, redes):
+    return f"# {cabecalho} Gerado por waf-atualiza-geo, não edite.\n" + "".join(
+        f"{rede} 1;\n" for rede in redes)
+
+
+def lista_pais(paises):
+    linhas = baixar(LACNIC_URL).decode("ascii", errors="replace").splitlines()
     cabecalho = next((l for l in linhas if l and not l.startswith("#")), "")
-    if cabecalho.split("|")[1:2] != ["lacnic"] or len(linhas) < MINIMO_LINHAS:
-        sys.exit("waf-atualiza-geo: arquivo do LACNIC inválido ou incompleto")
-    return linhas
+    if cabecalho.split("|")[1:2] != ["lacnic"] or len(linhas) < MINIMO_LINHAS_LACNIC:
+        raise ValueError("arquivo do LACNIC inválido ou incompleto")
 
-
-def redes_do_pais(linhas, paises):
-    v4, v6 = [], []
+    redes = []
     for linha in linhas:
         campos = linha.split("|")
         if len(campos) < 7 or campos[1] not in paises:
@@ -45,48 +76,90 @@ def redes_do_pais(linhas, paises):
             # Para IPv4 o campo é a quantidade de endereços, nem sempre
             # potência de 2.
             primeiro = ipaddress.IPv4Address(inicio)
-            v4.extend(ipaddress.summarize_address_range(primeiro, primeiro + valor - 1))
+            redes.extend(faixa(primeiro, primeiro + valor - 1))
         elif tipo == "ipv6":
-            v6.append(ipaddress.IPv6Network(f"{inicio}/{valor}"))
-    return list(ipaddress.collapse_addresses(v4)) + list(ipaddress.collapse_addresses(v6))
+            redes.append(ipaddress.IPv6Network(f"{inicio}/{valor}"))
+    if not redes:
+        raise ValueError(f"nenhuma faixa encontrada para {','.join(paises)}")
+    return formatar(f"Países liberados ({','.join(paises)}), dados do LACNIC.", colapsar(redes))
 
 
-def conteudo(redes, paises):
-    linhas = [f"# Gerado por waf-atualiza-geo a partir do LACNIC ({','.join(paises)}). Não edite.\n"]
-    linhas += [f"{rede} 1;\n" for rede in redes]
-    return "".join(linhas)
+def ler_asns(caminho):
+    asns = set()
+    with open(caminho) as f:
+        for linha in f:
+            linha = linha.split("#", 1)[0].strip().upper().removeprefix("AS")
+            if linha:
+                asns.add(int(linha))
+    return asns
 
 
-def aplicar(novo, destino, recarregar):
-    if os.path.exists(destino):
-        with open(destino) as f:
-            if f.read() == novo:
-                print("waf-atualiza-geo: sem mudanças")
-                return
-    pasta = os.path.dirname(destino)
-    os.makedirs(pasta, exist_ok=True)
-    fd, temporario = tempfile.mkstemp(dir=pasta, prefix=".geo-pais.")
-    with os.fdopen(fd, "w") as f:
-        f.write(novo)
-    os.chmod(temporario, 0o644)
+def baixar_dbip():
+    # O arquivo do mês novo pode ainda não ter saído nos primeiros dias.
+    hoje = datetime.date.today()
+    mes_passado = hoje.replace(day=1) - datetime.timedelta(days=1)
+    for data in (hoje, mes_passado):
+        try:
+            return baixar(DBIP_URL.format(data))
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+    raise ValueError("base DB-IP ASN Lite não encontrada")
 
-    anterior = destino + ".anterior"
-    tinha_anterior = os.path.exists(destino)
-    if tinha_anterior:
-        shutil.copy2(destino, anterior)
-    os.replace(temporario, destino)
+
+def lista_datacenters(caminho_asns):
+    asns = ler_asns(caminho_asns)
+    texto = gzip.decompress(baixar_dbip()).decode("utf-8", errors="replace")
+    linhas = texto.splitlines()
+    if len(linhas) < MINIMO_LINHAS_DBIP:
+        raise ValueError("base DB-IP ASN Lite inválida ou incompleta")
+
+    redes = []
+    for inicio, fim, asn, _org in csv.reader(io.StringIO(texto)):
+        if int(asn) in asns:
+            redes.extend(faixa(inicio, fim))
+    return formatar("Datacenters bloqueados (asn-datacenters.txt), dados do DB-IP Lite "
+                    "(https://db-ip.com, CC BY 4.0).", colapsar(redes))
+
+
+def aplicar(novos, recarregar):
+    mudados = {}
+    for destino, conteudo in novos.items():
+        if os.path.exists(destino):
+            with open(destino) as f:
+                if f.read() == conteudo:
+                    continue
+        mudados[destino] = conteudo
+    if not mudados:
+        print("waf-atualiza-geo: sem mudanças")
+        return
+
+    anteriores = {}
+    for destino, conteudo in mudados.items():
+        pasta = os.path.dirname(destino)
+        os.makedirs(pasta, exist_ok=True)
+        fd, temporario = tempfile.mkstemp(dir=pasta, prefix=".waf-geo.")
+        with os.fdopen(fd, "w") as f:
+            f.write(conteudo)
+        os.chmod(temporario, 0o644)
+        if os.path.exists(destino):
+            anteriores[destino] = destino + ".anterior"
+            shutil.copy2(destino, anteriores[destino])
+        os.replace(temporario, destino)
 
     teste = subprocess.run(["nginx", "-t"], capture_output=True, text=True)
     if teste.returncode != 0:
-        if tinha_anterior:
-            os.replace(anterior, destino)
-        else:
-            os.remove(destino)
-        sys.exit("waf-atualiza-geo: nginx -t falhou, arquivo anterior mantido\n" + teste.stderr)
+        for destino in mudados:
+            if destino in anteriores:
+                os.replace(anteriores[destino], destino)
+            else:
+                os.remove(destino)
+        sys.exit("waf-atualiza-geo: nginx -t falhou, listas anteriores mantidas\n" + teste.stderr)
 
     if recarregar and subprocess.run(["systemctl", "is-active", "--quiet", "nginx"]).returncode == 0:
         subprocess.run(["systemctl", "reload", "nginx"], check=True)
-    print(f"waf-atualiza-geo: {destino} atualizado")
+    for destino in mudados:
+        print(f"waf-atualiza-geo: {destino} atualizado")
 
 
 def main():
@@ -96,12 +169,20 @@ def main():
     parser.add_argument("--sem-reload", action="store_true",
                         help="não recarrega o Nginx depois de atualizar")
     args = parser.parse_args()
-
     paises = [p.strip().upper() for p in args.paises.split(",") if p.strip()]
-    redes = redes_do_pais(baixar(), paises)
-    if not redes:
-        sys.exit(f"waf-atualiza-geo: nenhuma faixa encontrada para {','.join(paises)}")
-    aplicar(conteudo(redes, paises), DESTINO, not args.sem_reload)
+
+    # Uma fonte fora do ar não impede a atualização da outra.
+    novos, falhas = {}, []
+    for destino, gerar in ((ARQ_PAIS, lambda: lista_pais(paises)),
+                           (ARQ_DATACENTERS, lambda: lista_datacenters(LISTA_ASNS))):
+        try:
+            novos[destino] = gerar()
+        except Exception as e:
+            falhas.append(f"{destino}: {e}")
+
+    aplicar(novos, not args.sem_reload)
+    if falhas:
+        sys.exit("waf-atualiza-geo: falha ao gerar\n  " + "\n  ".join(falhas))
 
 
 if __name__ == "__main__":

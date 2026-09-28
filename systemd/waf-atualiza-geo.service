@@ -1,0 +1,8 @@
+[Unit]
+Description=Atualiza as faixas de IP por país do WAF
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/waf-atualiza-geo --paises BR

@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Gera as faixas de IP de um país para o módulo geo do Nginx.
+
+Baixa as delegações de IP do LACNIC, converte em blocos CIDR e grava
+/etc/nginx/waf/geo-pais.conf. Se o Nginx rejeitar o arquivo novo, o
+anterior é restaurado. Só funciona para países da região do LACNIC
+(América Latina e Caribe).
+"""
+import argparse
+import ipaddress
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.request
+
+URL = "https://ftp.lacnic.net/pub/stats/lacnic/delegated-lacnic-extended-latest"
+DESTINO = "/etc/nginx/waf/geo-pais.conf"
+# O arquivo completo tem dezenas de milhares de linhas; bem menos que isso
+# indica download truncado.
+MINIMO_LINHAS = 10000
+
+
+def baixar():
+    with urllib.request.urlopen(URL, timeout=120) as resposta:
+        texto = resposta.read().decode("ascii", errors="replace")
+    linhas = texto.splitlines()
+    cabecalho = next((l for l in linhas if l and not l.startswith("#")), "")
+    if cabecalho.split("|")[1:2] != ["lacnic"] or len(linhas) < MINIMO_LINHAS:
+        sys.exit("waf-atualiza-geo: arquivo do LACNIC inválido ou incompleto")
+    return linhas
+
+
+def redes_do_pais(linhas, paises):
+    v4, v6 = [], []
+    for linha in linhas:
+        campos = linha.split("|")
+        if len(campos) < 7 or campos[1] not in paises:
+            continue
+        if campos[6] not in ("allocated", "assigned"):
+            continue
+        tipo, inicio, valor = campos[2], campos[3], int(campos[4])
+        if tipo == "ipv4":
+            # Para IPv4 o campo é a quantidade de endereços, nem sempre
+            # potência de 2.
+            primeiro = ipaddress.IPv4Address(inicio)
+            v4.extend(ipaddress.summarize_address_range(primeiro, primeiro + valor - 1))
+        elif tipo == "ipv6":
+            v6.append(ipaddress.IPv6Network(f"{inicio}/{valor}"))
+    return list(ipaddress.collapse_addresses(v4)) + list(ipaddress.collapse_addresses(v6))
+
+
+def conteudo(redes, paises):
+    linhas = [f"# Gerado por waf-atualiza-geo a partir do LACNIC ({','.join(paises)}). Não edite.\n"]
+    linhas += [f"{rede} 1;\n" for rede in redes]
+    return "".join(linhas)
+
+
+def aplicar(novo, destino, recarregar):
+    if os.path.exists(destino):
+        with open(destino) as f:
+            if f.read() == novo:
+                print("waf-atualiza-geo: sem mudanças")
+                return
+    pasta = os.path.dirname(destino)
+    os.makedirs(pasta, exist_ok=True)
+    fd, temporario = tempfile.mkstemp(dir=pasta, prefix=".geo-pais.")
+    with os.fdopen(fd, "w") as f:
+        f.write(novo)
+    os.chmod(temporario, 0o644)
+
+    anterior = destino + ".anterior"
+    tinha_anterior = os.path.exists(destino)
+    if tinha_anterior:
+        shutil.copy2(destino, anterior)
+    os.replace(temporario, destino)
+
+    teste = subprocess.run(["nginx", "-t"], capture_output=True, text=True)
+    if teste.returncode != 0:
+        if tinha_anterior:
+            os.replace(anterior, destino)
+        else:
+            os.remove(destino)
+        sys.exit("waf-atualiza-geo: nginx -t falhou, arquivo anterior mantido\n" + teste.stderr)
+
+    if recarregar and subprocess.run(["systemctl", "is-active", "--quiet", "nginx"]).returncode == 0:
+        subprocess.run(["systemctl", "reload", "nginx"], check=True)
+    print(f"waf-atualiza-geo: {destino} atualizado")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--paises", default="BR",
+                        help="códigos ISO separados por vírgula (padrão: BR)")
+    parser.add_argument("--sem-reload", action="store_true",
+                        help="não recarrega o Nginx depois de atualizar")
+    args = parser.parse_args()
+
+    paises = [p.strip().upper() for p in args.paises.split(",") if p.strip()]
+    redes = redes_do_pais(baixar(), paises)
+    if not redes:
+        sys.exit(f"waf-atualiza-geo: nenhuma faixa encontrada para {','.join(paises)}")
+    aplicar(conteudo(redes, paises), DESTINO, not args.sem_reload)
+
+
+if __name__ == "__main__":
+    main()

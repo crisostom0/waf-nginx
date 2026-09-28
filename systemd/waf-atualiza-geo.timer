@@ -1,0 +1,10 @@
+[Unit]
+Description=Atualiza diariamente as faixas de IP por país do WAF
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

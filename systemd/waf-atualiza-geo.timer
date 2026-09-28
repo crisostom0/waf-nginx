@@ -1,5 +1,5 @@
 [Unit]
-Description=Atualiza diariamente as faixas de IP por país do WAF
+Description=Atualiza diariamente as listas de IP do WAF
 
 [Timer]
 OnCalendar=daily

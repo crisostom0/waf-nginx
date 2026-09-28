@@ -8,6 +8,7 @@ Instala direto no servidor (sem Docker) um proxy reverso NGINX com:
 
 - **ModSecurity 3 + OWASP Core Rule Set 4**: bloqueia ataques comuns como SQL Injection, XSS e LFI.
 - **Bloqueio por país**: só o Brasil e redes privadas (10/8, 172.16/12, 192.168/16, localhost…) passam; o resto recebe 403.
+- **Bloqueio de datacenters**: IPs de nuvens e hospedagens (AWS, Azure, Locaweb, UOL Host, Equinix…) recebem 403, porque é de lá que vem boa parte dos bots.
 
 ### Sistemas suportados
 
@@ -40,9 +41,9 @@ O instalador:
 - no Ubuntu/Debian, desativa o site padrão do NGINX (ele também ocupa a porta 80);
 - no Rocky/RHEL, libera o NGINX no SELinux para conectar no backend;
 - abre as portas 80 e 443 no firewalld ou no ufw, se estiverem ativos;
-- gera a lista de IPs do Brasil e agenda a atualização diária.
+- gera as listas de IPs do Brasil e dos datacenters e agenda a atualização diária.
 
-Pode rodar o `install.sh` de novo para atualizar. Ele não sobrescreve `backend.conf`, `exclusoes.conf` e `crs-setup.conf`.
+Pode rodar o `install.sh` de novo para atualizar. Ele não sobrescreve `backend.conf`, `asn-datacenters.txt`, `exclusoes.conf` e `crs-setup.conf`.
 
 ### Onde fica cada coisa
 
@@ -52,14 +53,21 @@ Pode rodar o `install.sh` de novo para atualizar. Ele não sobrescreve `backend.
 | `/etc/nginx/waf/backend.conf` | Endereço da aplicação protegida |
 | `/etc/nginx/waf/redes-privadas.conf` | Redes sempre liberadas |
 | `/etc/nginx/waf/geo-pais.conf` | Faixas de IP do Brasil (gerado, não edite) |
+| `/etc/nginx/waf/asn-datacenters.txt` | Provedores (ASN) bloqueados |
+| `/etc/nginx/waf/geo-datacenters.conf` | Faixas de IP desses provedores (gerado, não edite) |
 | `/etc/nginx/modsec/modsecurity.conf` | Configuração do ModSecurity |
 | `/etc/nginx/modsec/exclusoes.conf` | Exceções para falsos positivos |
 | `/etc/nginx/modsec/crs-setup.conf` | Configuração do OWASP CRS |
 | `/var/log/nginx/modsec/audit.log` | O que o WAF bloqueou e por quê |
 
-### Bloqueio por país
+### Listas de IP
 
-As faixas de IP vêm das delegações públicas do [LACNIC](https://www.lacnic.net/) (o registro de IPs da América Latina, que inclui o NIC.br). O timer `waf-atualiza-geo.timer` atualiza a lista uma vez por dia; se o NGINX rejeitar a lista nova, a anterior é mantida.
+Nenhuma das fontes exige conta ou chave:
+
+- **País**: delegações públicas do [LACNIC](https://www.lacnic.net/), o registro de IPs da América Latina, que inclui o NIC.br.
+- **Datacenters**: base gratuita [DB-IP Lite](https://db-ip.com) de IP para ASN (licença CC BY 4.0), atualizada mensalmente pelo DB-IP.
+
+O timer `waf-atualiza-geo.timer` atualiza as duas listas uma vez por dia. Se uma fonte estiver fora do ar, a outra é atualizada mesmo assim; se o NGINX rejeitar uma lista nova, a anterior é mantida.
 
 Para atualizar na hora:
 
@@ -70,6 +78,16 @@ sudo systemctl start waf-atualiza-geo.service
 Para liberar outros países da América Latina, edite `--paises` em `/etc/systemd/system/waf-atualiza-geo.service` (ex.: `--paises BR,AR`) e rode `sudo systemctl daemon-reload`.
 
 Essas faixas indicam onde o bloco de IP foi registrado, não onde o usuário está. Brasileiros usando VPN, proxy ou rede móvel estrangeira podem ser bloqueados.
+
+### Bloqueio de datacenters
+
+A lista de provedores fica em `/etc/nginx/waf/asn-datacenters.txt`, um ASN por linha. Depois de editar, aplique com:
+
+```bash
+sudo systemctl start waf-atualiza-geo.service
+```
+
+Cuidado com o que esse bloqueio também pega: monitoramentos (ex.: UptimeRobot), webhooks e integrações hospedados em nuvem, VPNs corporativas e empresas cuja saída de internet fica num datacenter. Se precisar liberar um desses, remova o provedor da lista. Nunca inclua a Cloudflare (AS13335) se o WAF ficar atrás dela.
 
 ### Falsos positivos
 
@@ -96,6 +114,8 @@ systemctl list-timers waf-atualiza-geo.timer
 
 ### Referências
 
+- IP to ASN Lite by [DB-IP](https://db-ip.com), licenciado sob [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+
 - https://nginx.org/en/docs/
 - https://github.com/owasp-modsecurity/ModSecurity
 - https://coreruleset.org/docs/
@@ -106,7 +126,7 @@ systemctl list-timers waf-atualiza-geo.timer
 
 # WAF with NGINX + ModSecurity
 
-Installs directly on the host (no Docker) an NGINX reverse proxy with ModSecurity 3 + OWASP Core Rule Set 4, allowing only Brazil and private networks (everything else gets 403).
+Installs directly on the host (no Docker) an NGINX reverse proxy with ModSecurity 3 + OWASP Core Rule Set 4, allowing only Brazil and private networks and blocking cloud/datacenter providers (everything else gets 403).
 
 Supported: Ubuntu 24.04+, Debian 12+, Rocky Linux / AlmaLinux / RHEL 9 (via EPEL).
 
@@ -118,4 +138,4 @@ sudo ./install.sh
 
 Then set your application's address in `/etc/nginx/waf/backend.conf` (default `127.0.0.1:8080`) and run `sudo nginx -t && sudo systemctl reload nginx`.
 
-Country ranges come from [LACNIC](https://www.lacnic.net/) delegation data and are refreshed daily by `waf-atualiza-geo.timer`. Blocked requests are logged to `/var/log/nginx/modsec/audit.log`; add targeted rule exclusions in `/etc/nginx/modsec/exclusoes.conf`.
+Country ranges come from [LACNIC](https://www.lacnic.net/) delegation data; datacenter ranges come from the providers (ASNs) in `/etc/nginx/waf/asn-datacenters.txt`, using IP to ASN Lite by [DB-IP](https://db-ip.com) (CC BY 4.0). Both are refreshed daily by `waf-atualiza-geo.timer`, with no account needed. Blocked requests are logged to `/var/log/nginx/modsec/audit.log`; add targeted rule exclusions in `/etc/nginx/modsec/exclusoes.conf`.

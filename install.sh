@@ -2,7 +2,8 @@
 # Instala o WAF (Nginx + ModSecurity + OWASP CRS + bloqueio por país e datacenter) direto
 # no host. Suporta Ubuntu 24.04+, Debian 12+ e Rocky/Alma/RHEL 9.
 # Pode ser rodado de novo para atualizar: arquivos que você personaliza
-# (backend.conf, asn-datacenters.txt, exclusoes.conf, crs-setup.conf) não são sobrescritos.
+# (backend.conf, asn-datacenters.txt, https.conf, exclusoes.conf,
+# crs-setup.conf) não são sobrescritos.
 set -euo pipefail
 
 CRS_VERSAO=4.29.0
@@ -80,11 +81,15 @@ instala 0644 "$REPO/nginx/waf.conf" /etc/nginx/conf.d/waf.conf
 instala 0644 "$REPO/nginx/redes-privadas.conf" /etc/nginx/waf/redes-privadas.conf
 instala_se_ausente "$REPO/nginx/backend.conf" /etc/nginx/waf/backend.conf
 instala_se_ausente "$REPO/nginx/asn-datacenters.txt" /etc/nginx/waf/asn-datacenters.txt
+instala_se_ausente "$REPO/nginx/https.conf" /etc/nginx/waf/https.conf
 
 instala 0644 "$REPO/modsec/main.conf" /etc/nginx/modsec/main.conf
 instala 0644 "$REPO/modsec/modsecurity.conf" /etc/nginx/modsec/modsecurity.conf
 instala_se_ausente "$REPO/modsec/exclusoes.conf" /etc/nginx/modsec/exclusoes.conf
 instala_se_ausente "$CRS_DIR/crs-setup.conf.example" /etc/nginx/modsec/crs-setup.conf
+
+# Arquivos de validação do Let's Encrypt (certbot --webroot).
+install -d -m 0755 /var/www/acme
 
 # O log de auditoria tem dados das requisições: só o usuário do Nginx lê.
 install -d -m 0750 -o "$NGINX_USUARIO" /var/log/nginx/modsec
@@ -99,7 +104,7 @@ instala 0644 "$REPO/systemd/waf-atualiza-geo.timer" /etc/systemd/system/waf-atua
 if command -v getenforce >/dev/null && [[ $(getenforce) != Disabled ]]; then
     # Permite ao Nginx conectar no backend.
     setsebool -P httpd_can_network_connect 1
-    restorecon -R /etc/nginx /var/log/nginx /usr/local/sbin/waf-atualiza-geo /etc/systemd/system/waf-atualiza-geo.*
+    restorecon -R /etc/nginx /var/log/nginx /var/www/acme /usr/local/sbin/waf-atualiza-geo /etc/systemd/system/waf-atualiza-geo.*
 fi
 
 if systemctl is-active --quiet firewalld; then

@@ -1,5 +1,5 @@
 [Unit]
-Description=Atualiza as faixas de IP por país do WAF
+Description=Atualiza as listas de IP (país e datacenters) do WAF
 Wants=network-online.target
 After=network-online.target
 

@@ -43,7 +43,7 @@ O instalador:
 - abre as portas 80 e 443 no firewalld ou no ufw, se estiverem ativos;
 - gera as listas de IPs do Brasil e dos datacenters e agenda a atualização diária.
 
-Pode rodar o `install.sh` de novo para atualizar. Ele não sobrescreve `backend.conf`, `asn-datacenters.txt`, `https.conf`, `exclusoes.conf` e `crs-setup.conf`.
+Pode rodar o `install.sh` de novo para atualizar. Ele não sobrescreve `backend.conf`, `asn-datacenters.txt`, `https.conf`, `ips-liberados.conf`, `exclusoes.conf` e `crs-setup.conf`.
 
 ### Onde fica cada coisa
 
@@ -52,7 +52,8 @@ Pode rodar o `install.sh` de novo para atualizar. Ele não sobrescreve `backend.
 | `/etc/nginx/conf.d/waf.conf` | Servidor NGINX do WAF |
 | `/etc/nginx/waf/backend.conf` | Endereço da aplicação protegida |
 | `/etc/nginx/waf/https.conf` | Porta 443 e certificado |
-| `/etc/nginx/waf/redes-privadas.conf` | Redes sempre liberadas |
+| `/etc/nginx/waf/redes-privadas.conf` | Redes privadas, sempre liberadas |
+| `/etc/nginx/waf/ips-liberados.conf` | Outros IPs sempre liberados (monitoramento, parceiros) |
 | `/etc/nginx/waf/geo-pais.conf` | Faixas de IP do Brasil (gerado, não edite) |
 | `/etc/nginx/waf/asn-datacenters.txt` | Provedores (ASN) bloqueados |
 | `/etc/nginx/waf/geo-datacenters.conf` | Faixas de IP desses provedores (gerado, não edite) |
@@ -88,7 +89,7 @@ A lista de provedores fica em `/etc/nginx/waf/asn-datacenters.txt`, um ASN por l
 sudo systemctl start waf-atualiza-geo.service
 ```
 
-Cuidado com o que esse bloqueio também pega: monitoramentos (ex.: UptimeRobot), webhooks e integrações hospedados em nuvem, VPNs corporativas e empresas cuja saída de internet fica num datacenter. Se precisar liberar um desses, remova o provedor da lista. Nunca inclua a Cloudflare (AS13335) se o WAF ficar atrás dela.
+Cuidado com o que esse bloqueio também pega: monitoramentos (ex.: UptimeRobot), webhooks e integrações hospedados em nuvem, VPNs corporativas e empresas cuja saída de internet fica num datacenter. Para liberar um serviço específico sem tirar o provedor inteiro da lista, coloque o IP dele em `/etc/nginx/waf/ips-liberados.conf`; o ModSecurity continua inspecionando o tráfego desse IP. Nunca inclua a Cloudflare (AS13335) se o WAF ficar atrás dela.
 
 ### Falsos positivos
 

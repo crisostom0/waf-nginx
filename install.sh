@@ -2,8 +2,8 @@
 # Instala o WAF (Nginx + ModSecurity + OWASP CRS + bloqueio por país e datacenter) direto
 # no host. Suporta Ubuntu 24.04+, Debian 12+ e Rocky/Alma/RHEL 9.
 # Pode ser rodado de novo para atualizar: arquivos que você personaliza
-# (backend.conf, asn-datacenters.txt, https.conf, exclusoes.conf,
-# crs-setup.conf) não são sobrescritos.
+# (backend.conf, asn-datacenters.txt, https.conf, ips-liberados.conf,
+# exclusoes.conf, crs-setup.conf) não são sobrescritos.
 set -euo pipefail
 
 CRS_VERSAO=4.29.0
@@ -82,6 +82,7 @@ instala 0644 "$REPO/nginx/redes-privadas.conf" /etc/nginx/waf/redes-privadas.con
 instala_se_ausente "$REPO/nginx/backend.conf" /etc/nginx/waf/backend.conf
 instala_se_ausente "$REPO/nginx/asn-datacenters.txt" /etc/nginx/waf/asn-datacenters.txt
 instala_se_ausente "$REPO/nginx/https.conf" /etc/nginx/waf/https.conf
+instala_se_ausente "$REPO/nginx/ips-liberados.conf" /etc/nginx/waf/ips-liberados.conf
 
 instala 0644 "$REPO/modsec/main.conf" /etc/nginx/modsec/main.conf
 instala 0644 "$REPO/modsec/modsecurity.conf" /etc/nginx/modsec/modsecurity.conf

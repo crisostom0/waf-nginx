@@ -43,7 +43,7 @@ O instalador:
 - abre as portas 80 e 443 no firewalld ou no ufw, se estiverem ativos;
 - gera as listas de IPs do Brasil e dos datacenters e agenda a atualização diária.
 
-Pode rodar o `install.sh` de novo para atualizar. Ele não sobrescreve `backend.conf`, `asn-datacenters.txt`, `exclusoes.conf` e `crs-setup.conf`.
+Pode rodar o `install.sh` de novo para atualizar. Ele não sobrescreve `backend.conf`, `asn-datacenters.txt`, `https.conf`, `exclusoes.conf` e `crs-setup.conf`.
 
 ### Onde fica cada coisa
 
@@ -51,6 +51,7 @@ Pode rodar o `install.sh` de novo para atualizar. Ele não sobrescreve `backend.
 |---|---|
 | `/etc/nginx/conf.d/waf.conf` | Servidor NGINX do WAF |
 | `/etc/nginx/waf/backend.conf` | Endereço da aplicação protegida |
+| `/etc/nginx/waf/https.conf` | Porta 443 e certificado |
 | `/etc/nginx/waf/redes-privadas.conf` | Redes sempre liberadas |
 | `/etc/nginx/waf/geo-pais.conf` | Faixas de IP do Brasil (gerado, não edite) |
 | `/etc/nginx/waf/asn-datacenters.txt` | Provedores (ASN) bloqueados |
@@ -99,9 +100,18 @@ sudo grep -oE 'id "[0-9]+"' /var/log/nginx/modsec/audit.log | sort | uniq -c | s
 
 Com os IDs em mãos, crie exceções pontuais em `/etc/nginx/modsec/exclusoes.conf` (há um exemplo no arquivo) em vez de liberar rotas inteiras.
 
+Um falso positivo comum em integrações: o CRS bloqueia o header `Expect` (regra 920450), usado em ataques de *desync*. O `curl` e bibliotecas como as do PHP e do .NET mandam `Expect: 100-continue` em uploads grandes. O melhor é desligar isso no cliente (no curl, `-H 'Expect:'`; no .NET, `ServicePointManager.Expect100Continue = false`). Se não der, veja o comentário sobre `restricted_headers_basic` em `crs-setup.conf`.
+
 ### HTTPS
 
-Descomente o bloco HTTPS no fim de `/etc/nginx/conf.d/waf.conf` e ajuste os caminhos do certificado, ou use o Certbot (`certbot --nginx`).
+1. Aponte o domínio para o IP do WAF. Na Cloudflare, deixe o registro como **DNS only** (nuvem cinza): com o proxy ligado, o tráfego chega pelos IPs da Cloudflare e o bloqueio por país barra todo mundo.
+2. Instale o Certbot (`sudo dnf install certbot` no Rocky, `sudo apt install certbot` no Ubuntu/Debian) e emita o certificado. A rota de validação `/.well-known/acme-challenge/` fica fora do bloqueio por origem, porque os servidores do Let's Encrypt estão fora do Brasil.
+   ```bash
+   sudo certbot certonly --webroot -w /var/www/acme -d seu.dominio.com.br --deploy-hook "systemctl reload nginx"
+   ```
+3. Descomente `/etc/nginx/waf/https.conf`, troque `exemplo.com.br` pelo seu domínio e aplique com `sudo nginx -t && sudo systemctl reload nginx`.
+
+O Certbot renova o certificado sozinho e recarrega o NGINX depois de cada renovação.
 
 ### Comandos úteis
 

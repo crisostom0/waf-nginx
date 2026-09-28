@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Instala o WAF (Nginx + ModSecurity + OWASP CRS + bloqueio por país) direto
+# Instala o WAF (Nginx + ModSecurity + OWASP CRS + bloqueio por país e datacenter) direto
 # no host. Suporta Ubuntu 24.04+, Debian 12+ e Rocky/Alma/RHEL 9.
 # Pode ser rodado de novo para atualizar: arquivos que você personaliza
-# (backend.conf, exclusoes.conf, crs-setup.conf) não são sobrescritos.
+# (backend.conf, asn-datacenters.txt, exclusoes.conf, crs-setup.conf) não são sobrescritos.
 set -euo pipefail
 
 CRS_VERSAO=4.29.0
@@ -79,6 +79,7 @@ instala_se_ausente() {
 instala 0644 "$REPO/nginx/waf.conf" /etc/nginx/conf.d/waf.conf
 instala 0644 "$REPO/nginx/redes-privadas.conf" /etc/nginx/waf/redes-privadas.conf
 instala_se_ausente "$REPO/nginx/backend.conf" /etc/nginx/waf/backend.conf
+instala_se_ausente "$REPO/nginx/asn-datacenters.txt" /etc/nginx/waf/asn-datacenters.txt
 
 instala 0644 "$REPO/modsec/main.conf" /etc/nginx/modsec/main.conf
 instala 0644 "$REPO/modsec/modsecurity.conf" /etc/nginx/modsec/modsecurity.conf
@@ -111,7 +112,7 @@ fi
 
 # --- Faixas de IP e ativação --------------------------------------------------
 
-# Gera geo-pais.conf e valida toda a configuração com nginx -t.
+# Gera geo-pais.conf e geo-datacenters.conf e valida toda a configuração com nginx -t.
 /usr/local/sbin/waf-atualiza-geo --paises BR --sem-reload
 
 systemctl daemon-reload

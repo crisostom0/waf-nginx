@@ -99,6 +99,8 @@ sudo grep -oE 'id "[0-9]+"' /var/log/nginx/modsec/audit.log | sort | uniq -c | s
 
 Com os IDs em mãos, crie exceções pontuais em `/etc/nginx/modsec/exclusoes.conf` (há um exemplo no arquivo) em vez de liberar rotas inteiras.
 
+Um falso positivo comum em integrações: o CRS bloqueia o header `Expect` (regra 920450), usado em ataques de *desync*. O `curl` e bibliotecas como as do PHP e do .NET mandam `Expect: 100-continue` em uploads grandes. O melhor é desligar isso no cliente (no curl, `-H 'Expect:'`; no .NET, `ServicePointManager.Expect100Continue = false`). Se não der, veja o comentário sobre `restricted_headers_basic` em `crs-setup.conf`.
+
 ### HTTPS
 
 Descomente o bloco HTTPS no fim de `/etc/nginx/conf.d/waf.conf` e ajuste os caminhos do certificado, ou use o Certbot (`certbot --nginx`).

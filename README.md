@@ -105,7 +105,7 @@ Um falso positivo comum em integrações: o CRS bloqueia o header `Expect` (regr
 
 ### HTTPS
 
-1. Aponte o domínio para o IP do WAF. Na Cloudflare, deixe o registro como **DNS only** (nuvem cinza): com o proxy ligado, o tráfego chega pelos IPs da Cloudflare e o bloqueio por país barra todo mundo.
+1. Aponte o domínio para o IP do WAF no DNS.
 2. Instale o Certbot (`sudo dnf install certbot` no Rocky, `sudo apt install certbot` no Ubuntu/Debian) e emita o certificado. A rota de validação `/.well-known/acme-challenge/` fica fora do bloqueio por origem, porque os servidores do Let's Encrypt estão fora do Brasil.
    ```bash
    sudo certbot certonly --webroot -w /var/www/acme -d seu.dominio.com.br --deploy-hook "systemctl reload nginx"
